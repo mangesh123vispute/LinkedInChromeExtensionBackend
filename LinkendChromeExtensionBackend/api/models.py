@@ -1,6 +1,5 @@
 import uuid
 from django.db import models
-from django.contrib.postgres.fields import JSONField
 
 
 class Profile(models.Model):
@@ -23,8 +22,8 @@ class Profile(models.Model):
     name = models.TextField(help_text="Profile name")
     headline = models.TextField(blank=True, null=True, help_text="Professional headline")
     disc_primary = models.TextField(blank=True, null=True, help_text="Primary DISC type")
-    disc_breakdown = JSONField(default=dict, blank=True, help_text="DISC breakdown (dominance, influence, steadiness, compliance)")
-    raw_data = JSONField(default=dict, blank=True, help_text="Full analysis response from Gemini")
+    disc_breakdown = models.JSONField(default=dict, blank=True, help_text="DISC breakdown (dominance, influence, steadiness, compliance)")
+    raw_data = models.JSONField(default=dict, blank=True, help_text="Full analysis response from Gemini")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Creation timestamp")
 
     class Meta:

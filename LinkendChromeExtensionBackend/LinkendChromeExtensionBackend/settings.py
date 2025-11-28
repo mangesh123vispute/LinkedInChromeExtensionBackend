@@ -30,7 +30,7 @@ SECRET_KEY = "django-insecure-(4wq^=j8q(+u(!fk1u)i70e-3mn-)_p&n&r8812l5i$2)nmbxw
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '*']
 
 
 # Application definition
@@ -44,7 +44,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     'rest_framework',
     'api',
-    'drf_spectacular',
+    'drf_yasg',
     'corsheaders',
 ]
 
@@ -78,64 +78,16 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "LinkendChromeExtensionBackend.wsgi.application"
 
-
-# Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
-# Check if DATABASE_URL is provided (alternative connection method)
-DATABASE_URL = os.getenv('DATABASE_URL', '')
-
-if DATABASE_URL:
-    # Parse DATABASE_URL if provided
-    # Format: postgresql://user:password@host:port/database
-    import re
-    match = re.match(r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', DATABASE_URL)
-    if match:
-        DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME = match.groups()
-        DATABASES = {
-            "default": {
-                "ENGINE": "django.db.backends.postgresql",
-                "NAME": DB_NAME,
-                "USER": DB_USER,
-                "PASSWORD": DB_PASSWORD,
-                "HOST": DB_HOST,
-                "PORT": DB_PORT,
-                "OPTIONS": {
-                    "sslmode": "require",
-                },
-            }
-        }
-    else:
-        # Fallback to SQLite if DATABASE_URL format is invalid
-        DATABASES = {
-            "default": {
-                "ENGINE": "django.db.backends.sqlite3",
-                "NAME": BASE_DIR / "db.sqlite3",
-            }
-        }
-elif DB_PASSWORD and DB_HOST:
-    # Use Supabase PostgreSQL if credentials are provided
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": DB_NAME,
-            "USER": DB_USER,
-            "PASSWORD": DB_PASSWORD,
-            "HOST": DB_HOST,
-            "PORT": DB_PORT,
-            "OPTIONS": {
-                "sslmode": "require" if DB_USE_SSL else "disable",
-            },
-        }
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'postgres',
+        'USER': 'postgres',
+        'PASSWORD': os.getenv('DB_PASSWORD', ''),
+        'HOST': os.getenv('DB_HOST', ''),
+        'PORT': '5432',
     }
-else:
-    # Fallback to SQLite for local development
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
-    }
+}
 
 
 # Password validation
@@ -183,27 +135,28 @@ CORS_ALLOW_ALL_ORIGINS = True
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
-    "chrome-extension://*",  # Allow Chrome extension
+    "http://localhost:8000",
+    "chrome-extension://cfnlcbonedobbclficokdccgflbcifpl",
+]
+
+# Allow Chrome extensions (they don't have a specific origin)
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
 ]
 
 # Environment variables
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
-SUPABASE_URL = os.getenv('NEXT_PUBLIC_SUPABASE_URL', '')
 SUPABASE_ANON_KEY = os.getenv('NEXT_PUBLIC_SUPABASE_ANON_KEY', '')
 SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY', '')
-
-# Supabase Database Configuration
-# Extract project reference from Supabase URL
-# Format: https://{project_ref}.supabase.co
-SUPABASE_PROJECT_REF = SUPABASE_URL.replace('https://', '').replace('.supabase.co', '') if SUPABASE_URL else ''
-
-# Database connection details from environment or construct from Supabase URL
-DB_HOST = os.getenv('DB_HOST', f'db.{SUPABASE_PROJECT_REF}.supabase.co' if SUPABASE_PROJECT_REF else 'localhost')
-DB_PORT = os.getenv('DB_PORT', '5432')
-DB_NAME = os.getenv('DB_NAME', 'postgres')
-DB_USER = os.getenv('DB_USER', 'postgres')
-DB_PASSWORD = os.getenv('DB_PASSWORD', '')
-DB_USE_SSL = os.getenv('DB_USE_SSL', 'True').lower() == 'true'
 
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
