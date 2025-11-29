@@ -164,7 +164,7 @@ Make this analysis SPECIFIC to this person based on their actual content, not ge
     if not gemini_api_key:
         raise ValueError('GEMINI_API_KEY is not configured in environment variables')
 
-    api_url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
+    api_url = settings.GEMINI_API_URL
     
     response = requests.post(
         api_url,
@@ -423,7 +423,7 @@ Return ONLY this JSON (no markdown):
     if not gemini_api_key:
         raise ValueError('GEMINI_API_KEY is not configured in environment variables')
 
-    api_url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
+    api_url = settings.GEMINI_API_URL
     
     response = requests.post(
         api_url,
