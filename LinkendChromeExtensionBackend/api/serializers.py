@@ -22,6 +22,11 @@ class ProfileDataSerializer(serializers.Serializer):
     posts = PostSerializer(many=True, required=False, allow_null=True)
 
 
+class EmailTemplateSerializer(serializers.Serializer):
+    subject = serializers.CharField()
+    body = serializers.CharField()
+
+
 class AnalysisResponseSerializer(serializers.Serializer):
     dominance = serializers.IntegerField()
     influence = serializers.IntegerField()
@@ -38,6 +43,9 @@ class AnalysisResponseSerializer(serializers.Serializer):
     communicationDos = serializers.ListField(child=serializers.CharField())
     communicationDonts = serializers.ListField(child=serializers.CharField())
     bestApproach = serializers.CharField()
+    emailTemplate = EmailTemplateSerializer(required=False)
+    linkedinMessage = serializers.CharField(required=False)
+    followUpMessage = serializers.CharField(required=False)
 
 
 class ProfileSaveSerializer(serializers.Serializer):
