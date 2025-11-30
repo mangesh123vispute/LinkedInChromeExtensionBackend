@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Profile
+from .models import AnalyzedProfile
 
 
 class PostSerializer(serializers.Serializer):
@@ -54,17 +54,43 @@ class AnalysisResponseSerializer(serializers.Serializer):
     followUpMessage = serializers.CharField(required=False)
 
 
-class ProfileSaveSerializer(serializers.Serializer):
-    """Serializer for saving profile with analysis data"""
-    profile_data = ProfileDataSerializer()
-    analysis_data = AnalysisResponseSerializer()
+class AnalyzedProfileSaveSerializer(serializers.Serializer):
+    """Serializer for saving analyzed profile data"""
+    # Basic fields
+    name = serializers.CharField(required=True)
+    headline = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    linkedin_profile = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    
+    # DISC fields
+    confidence = serializers.IntegerField(required=False, allow_null=True)
+    dominance = serializers.IntegerField(required=False, allow_null=True)
+    influence = serializers.IntegerField(required=False, allow_null=True)
+    steadiness = serializers.IntegerField(required=False, allow_null=True)
+    compliance = serializers.IntegerField(required=False, allow_null=True)
+    disc_primary = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    
+    # Analysis fields
+    key_insights = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
+    pain_points = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
+    communication_style = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    sales_approach = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    best_approach = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    ideal_pitch = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    communication_dos = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
+    communication_donts = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
+    
     user_id = serializers.UUIDField(required=False, allow_null=True)
 
 
-class ProfileModelSerializer(serializers.ModelSerializer):
-    """Serializer for Profile model"""
+class AnalyzedProfileModelSerializer(serializers.ModelSerializer):
+    """Serializer for AnalyzedProfile model"""
     class Meta:
-        model = Profile
-        fields = ['id', 'user_id', 'linkedin_url', 'name', 'headline', 'disc_primary', 
-                  'disc_breakdown', 'raw_data', 'created_at']
+        model = AnalyzedProfile
+        fields = [
+            'id', 'user_id', 'name', 'headline', 'linkedin_profile',
+            'confidence', 'dominance', 'influence', 'steadiness', 'compliance',
+            'disc_primary', 'key_insights', 'pain_points', 'communication_style',
+            'sales_approach', 'best_approach', 'ideal_pitch',
+            'communication_dos', 'communication_donts', 'raw_data', 'created_at'
+        ]
         read_only_fields = ['id', 'created_at']

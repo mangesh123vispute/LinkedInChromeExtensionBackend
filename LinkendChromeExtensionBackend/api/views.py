@@ -7,8 +7,8 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from .serializers import ProfileDataSerializer, AnalysisResponseSerializer, ProfileSaveSerializer, ProfileModelSerializer
-from .models import Profile
+from .serializers import ProfileDataSerializer, AnalysisResponseSerializer, AnalyzedProfileSaveSerializer, AnalyzedProfileModelSerializer
+from .models import AnalyzedProfile
 
 import pdb
 
@@ -73,7 +73,6 @@ def analyze_with_gemini(profile_data):
     """
     Analyze profile data using Google Gemini API.
     """
-    print(profile_data)
     # Format posts for the prompt
     posts_text = 'No recent posts available'
     if profile_data.get('posts') and len(profile_data['posts']) > 0:
@@ -219,28 +218,64 @@ Make this analysis SPECIFIC to this person based on their actual content, not ge
 
 @csrf_exempt
 @api_view(['POST'])
-def save_profile(request):
+def save_analyzed_data(request):
     """
-    Save LinkedIn profile data and analysis results to database.
+    Save analyzed LinkedIn profile data from LLM to database.
+    Accepts both camelCase (from LLM) and snake_case formats.
     
-    Expected request body:
+    Expected request body (can use either camelCase or snake_case):
     {
-        "profile_data": {
-            "name": "John Doe",
-            "headline": "Software Engineer",
-            "linkedin_url": "https://linkedin.com/in/johndoe",
-            ...
-        },
-        "analysis_data": {
-            "dominance": 35,
-            "influence": 30,
-            "primaryType": "Influence (I)",
-            ...
-        },
-        "user_id": "optional-uuid"  # Optional
+        "name": "John Doe",
+        "headline": "Software Engineer",
+        "linkedin_profile": "https://linkedin.com/in/johndoe",  // or "linkedin_url"
+        "confidence": 78,
+        "dominance": 35,
+        "influence": 30,
+        "steadiness": 20,
+        "compliance": 15,
+        "primaryType": "Influence (I)",  // or "disc_primary"
+        "keyInsights": ["insight1", "insight2"],  // or "key_insights"
+        "painPoints": ["pain1", "pain2"],  // or "pain_points"
+        "communicationStyle": "Description...",  // or "communication_style"
+        "salesApproach": "Description...",  // or "sales_approach"
+        "bestApproach": "Description...",  // or "best_approach"
+        "idealPitch": "Description...",  // or "ideal_pitch"
+        "communicationDos": ["do1", "do2"],  // or "communication_dos"
+        "communicationDonts": ["dont1", "dont2"],  // or "communication_donts"
+        "user_id": "optional-uuid"  // Optional
     }
     """
-    serializer = ProfileSaveSerializer(data=request.data)
+    # Normalize camelCase to snake_case for processing
+    data = request.data.copy()
+    
+    # Map camelCase fields to snake_case
+    field_mapping = {
+        'linkedin_url': 'linkedin_profile',
+        'primaryType': 'disc_primary',
+        'keyInsights': 'key_insights',
+        'painPoints': 'pain_points',
+        'communicationStyle': 'communication_style',
+        'salesApproach': 'sales_approach',
+        'bestApproach': 'best_approach',
+        'idealPitch': 'ideal_pitch',
+        'communicationDos': 'communication_dos',
+        'communicationDonts': 'communication_donts',
+    }
+    
+    # Apply mappings (prefer snake_case if both exist)
+    for camel_key, snake_key in field_mapping.items():
+        if camel_key in data and snake_key not in data:
+            data[snake_key] = data[camel_key]
+        elif camel_key in data and snake_key in data:
+            # Both exist, prefer snake_case
+            pass
+        # If only snake_case exists, keep it as is
+    
+    # Handle linkedin_url -> linkedin_profile
+    if 'linkedin_url' in data and 'linkedin_profile' not in data:
+        data['linkedin_profile'] = data['linkedin_url']
+    
+    serializer = AnalyzedProfileSaveSerializer(data=data)
     if not serializer.is_valid():
         return Response(
             {'error': 'Invalid data', 'details': serializer.errors},
@@ -248,35 +283,82 @@ def save_profile(request):
         )
     
     validated_data = serializer.validated_data
-    profile_data = validated_data['profile_data']
-    analysis_data = validated_data['analysis_data']
     user_id = validated_data.get('user_id')
     
     try:
-        # Prepare disc_breakdown
-        disc_breakdown = {
-            'dominance': analysis_data.get('dominance', 0),
-            'influence': analysis_data.get('influence', 0),
-            'steadiness': analysis_data.get('steadiness', 0),
-            'compliance': analysis_data.get('compliance', 0),
-        }
+        # Get linkedin_profile - handle empty strings as None
+        linkedin_profile = validated_data.get('linkedin_profile', '')
+        if linkedin_profile and linkedin_profile.strip():
+            linkedin_profile = linkedin_profile.strip()
+        else:
+            linkedin_profile = None
+
         
-        # Create profile record
-        profile = Profile.objects.create(
+        # Check if profile with same LinkedIn URL already exists
+        # Normalize URL for comparison (case-insensitive, remove trailing slashes)
+        if linkedin_profile:
+            # Normalize the URL: lowercase, remove trailing slash, remove query params
+            normalized_url = linkedin_profile.lower().strip().rstrip('/')
+            # Remove query parameters and fragments
+            if '?' in normalized_url:
+                normalized_url = normalized_url.split('?')[0]
+            if '#' in normalized_url:
+                normalized_url = normalized_url.split('#')[0]
+            
+            # Check for existing profiles with similar URLs
+            existing_profiles = AnalyzedProfile.objects.filter(
+                linkedin_profile__isnull=False
+            ).exclude(linkedin_profile='')
+            
+            for existing in existing_profiles:
+                # Normalize existing URL for comparison
+                existing_url = existing.linkedin_profile.lower().strip().rstrip('/')
+                if '?' in existing_url:
+                    existing_url = existing_url.split('?')[0]
+                if '#' in existing_url:
+                    existing_url = existing_url.split('#')[0]
+                
+                # Check if URLs match (after normalization)
+                if normalized_url == existing_url:
+                    # Return existing profile data with a message
+                    response_serializer = AnalyzedProfileModelSerializer(existing)
+                    return Response(
+                        {
+                            'message': 'Profile already exists in database',
+                            'already_exists': True,
+                            'profile': response_serializer.data
+                        },
+                        status=status.HTTP_200_OK
+                    )
+        
+        # Create analyzed profile record with all fields
+        analyzed_profile = AnalyzedProfile.objects.create(
             user_id=user_id,
-            linkedin_url=profile_data.get('linkedin_url', ''),
-            name=profile_data.get('name', ''),
-            headline=profile_data.get('headline', ''),
-            disc_primary=analysis_data.get('primaryType', ''),
-            disc_breakdown=disc_breakdown,
-            raw_data=analysis_data,  # Store full analysis response
+            name=validated_data.get('name', ''),
+            headline=validated_data.get('headline', ''),
+            linkedin_profile=linkedin_profile,
+            confidence=validated_data.get('confidence'),
+            dominance=validated_data.get('dominance'),
+            influence=validated_data.get('influence'),
+            steadiness=validated_data.get('steadiness'),
+            compliance=validated_data.get('compliance'),
+            disc_primary=validated_data.get('disc_primary', ''),
+            key_insights=validated_data.get('key_insights', []),
+            pain_points=validated_data.get('pain_points', []),
+            communication_style=validated_data.get('communication_style', ''),
+            sales_approach=validated_data.get('sales_approach', ''),
+            best_approach=validated_data.get('best_approach', ''),
+            ideal_pitch=validated_data.get('ideal_pitch', ''),
+            communication_dos=validated_data.get('communication_dos', []),
+            communication_donts=validated_data.get('communication_donts', []),
+            raw_data=request.data,  # Store original request data as backup
         )
         
         # Return saved profile
-        response_serializer = ProfileModelSerializer(profile)
+        response_serializer = AnalyzedProfileModelSerializer(analyzed_profile)
         return Response(
             {
-                'message': 'Profile saved successfully',
+                'message': 'Analyzed data saved successfully',
                 'profile': response_serializer.data
             },
             status=status.HTTP_201_CREATED
@@ -284,7 +366,7 @@ def save_profile(request):
         
     except Exception as e:
         return Response(
-            {'error': 'Failed to save profile', 'message': str(e)},
+            {'error': 'Failed to save analyzed data', 'message': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
