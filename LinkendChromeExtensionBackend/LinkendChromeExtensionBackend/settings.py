@@ -164,7 +164,16 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY', '')
 
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_AUTHENTICATION_CLASSES': [],
+    'DEFAULT_PERMISSION_CLASSES': [],
 }
+
+# Disable CSRF for API endpoints
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'chrome-extension://cfnlcbonedobbclficokdccgflbcifpl',
+]
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Your API',
     'DESCRIPTION': 'API documentation',

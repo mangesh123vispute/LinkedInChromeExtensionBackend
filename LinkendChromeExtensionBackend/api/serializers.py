@@ -20,6 +20,12 @@ class ProfileDataSerializer(serializers.Serializer):
     connectionsCount = serializers.CharField(required=False, allow_blank=True)
     linkedin_url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
     posts = PostSerializer(many=True, required=False, allow_null=True)
+    highlights = serializers.CharField(required=False, allow_blank=True)
+    services = serializers.CharField(required=False, allow_blank=True)
+    licensesAndCertifications = serializers.CharField(required=False, allow_blank=True)
+    followersCount = serializers.CharField(required=False, allow_blank=True)
+    currentCompany = serializers.CharField(required=False, allow_blank=True)
+    activity = serializers.CharField(required=False, allow_blank=True)
 
 
 class EmailTemplateSerializer(serializers.Serializer):

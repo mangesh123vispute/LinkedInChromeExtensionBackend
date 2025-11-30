@@ -10,8 +10,9 @@ from rest_framework import status
 from .serializers import ProfileDataSerializer, AnalysisResponseSerializer, ProfileSaveSerializer, ProfileModelSerializer
 from .models import Profile
 
+import pdb
 
-
+@csrf_exempt
 @api_view(['POST'])
 def analyze_profile(request):
     """
@@ -72,7 +73,7 @@ def analyze_with_gemini(profile_data):
     """
     Analyze profile data using Google Gemini API.
     """
-    
+    print(profile_data)
     # Format posts for the prompt
     posts_text = 'No recent posts available'
     if profile_data.get('posts') and len(profile_data['posts']) > 0:
@@ -86,11 +87,16 @@ def analyze_with_gemini(profile_data):
 PROFILE DATA:
 Name: {profile_data.get('name', 'Not available')}
 Location: {profile_data.get('location', 'Not available')}
-Headline: {profile_data.get('headline', 'Not available')}
+Headline (Full): {profile_data.get('headline', 'Not available')}
+Current Company: {profile_data.get('currentCompany', 'Not available')}
 Connections: {profile_data.get('connectionsCount', 'Unknown')}
+Followers: {profile_data.get('followersCount', 'Unknown')}
 
 About Section:
 {profile_data.get('about', 'No about section available')}
+
+Highlights:
+{profile_data.get('highlights', 'No highlights available')}
 
 Experience:
 {profile_data.get('experience', 'No experience data available')}
@@ -98,10 +104,16 @@ Experience:
 Education:
 {profile_data.get('education', 'No education data')}
 
+Licenses and Certifications:
+{profile_data.get('licensesAndCertifications', 'No licenses or certifications listed')}
+
 Top Skills: {profile_data.get('skills', 'No skills listed')}
 
-RECENT POSTS & ENGAGEMENT:
-{posts_text}
+Services:
+{profile_data.get('services', 'No services listed')}
+
+RECENT ACTIVITY & POSTS:
+{profile_data.get('activity', posts_text)}
 
 Based on this comprehensive profile, provide a DEEP personality analysis focusing on:
 1. DISC personality breakdown (must total 100%)
@@ -342,19 +354,27 @@ def generate_custom_message(message_type, query, profile_data):
 PROFILE INFORMATION:
 Name: {profile_data.get('name', 'Not available')}
 Location: {profile_data.get('location', 'Not available')}
-Headline: {profile_data.get('headline', 'Not available')}
+Headline (Full): {profile_data.get('headline', 'Not available')}
+Current Company: {profile_data.get('currentCompany', 'Not available')}
 Connections: {profile_data.get('connectionsCount', 'Unknown')}
+Followers: {profile_data.get('followersCount', 'Unknown')}
 
 About: {profile_data.get('about', 'No about section available')}
+
+Highlights: {profile_data.get('highlights', 'No highlights available')}
 
 Experience: {profile_data.get('experience', 'No experience data available')}
 
 Education: {profile_data.get('education', 'No education data')}
 
+Licenses and Certifications: {profile_data.get('licensesAndCertifications', 'No licenses or certifications listed')}
+
 Skills: {profile_data.get('skills', 'No skills listed')}
 
-Recent Posts:
-{posts_text}
+Services: {profile_data.get('services', 'No services listed')}
+
+Recent Activity:
+{profile_data.get('activity', posts_text)}
 """
 
     if message_type == 'email':
