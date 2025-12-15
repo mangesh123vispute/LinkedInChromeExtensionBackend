@@ -7,8 +7,8 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from .serializers import ProfileDataSerializer, AnalysisResponseSerializer, AnalyzedProfileSaveSerializer, AnalyzedProfileModelSerializer
-from .models import AnalyzedProfile
+from .serializers import ProfileDataSerializer, AnalysisResponseSerializer, AnalyzedProfileSaveSerializer, AnalyzedProfileModelSerializer, RawDataSerializer
+from .models import AnalyzedProfile, RawData, extract_linkedin_profile_id
 
 import pdb
 
@@ -38,7 +38,6 @@ def analyze_profile(request):
         ]
     }
     """
-    # Validate input data
     serializer = ProfileDataSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(
@@ -49,10 +48,8 @@ def analyze_profile(request):
     profile_data = serializer.validated_data
     
     try:
-        # Call Gemini API
         analysis_result = analyze_with_gemini(profile_data)
         
-        # Validate response
         response_serializer = AnalysisResponseSerializer(data=analysis_result)
         if not response_serializer.is_valid():
             return Response(
@@ -73,7 +70,6 @@ def analyze_with_gemini(profile_data):
     """
     Analyze profile data using Google Gemini API.
     """
-    # Format posts for the prompt
     posts_text = 'No recent posts available'
     if profile_data.get('posts') and len(profile_data['posts']) > 0:
         posts_text = '\n\n'.join([
@@ -89,13 +85,9 @@ Location: {profile_data.get('location', 'Not available')}
 Headline (Full): {profile_data.get('headline', 'Not available')}
 Current Company: {profile_data.get('currentCompany', 'Not available')}
 Connections: {profile_data.get('connectionsCount', 'Unknown')}
-Followers: {profile_data.get('followersCount', 'Unknown')}
 
 About Section:
 {profile_data.get('about', 'No about section available')}
-
-Highlights:
-{profile_data.get('highlights', 'No highlights available')}
 
 Experience:
 {profile_data.get('experience', 'No experience data available')}
@@ -103,13 +95,10 @@ Experience:
 Education:
 {profile_data.get('education', 'No education data')}
 
-Licenses and Certifications:
-{profile_data.get('licensesAndCertifications', 'No licenses or certifications listed')}
+Top Skills:
+{profile_data.get('topSkills', 'No top skills listed')}
 
-Top Skills: {profile_data.get('skills', 'No skills listed')}
-
-Services:
-{profile_data.get('services', 'No services listed')}
+All Skills: {profile_data.get('skills', 'No skills listed')}
 
 RECENT ACTIVITY & POSTS:
 {profile_data.get('activity', posts_text)}
@@ -190,8 +179,7 @@ Make this analysis SPECIFIC to this person based on their actual content, not ge
                 }]
             }],
             'generationConfig': {
-                'temperature': 0.8,
-                'maxOutputTokens': 2048
+                'temperature': 0.8
             }
         }
     )
@@ -200,9 +188,13 @@ Make this analysis SPECIFIC to this person based on their actual content, not ge
         raise Exception(f'Gemini API error: {response.status_code} - {response.text}')
     
     data = response.json()
+    
+    finish_reason = data.get('candidates', [{}])[0].get('finishReason', '')
+    if finish_reason == 'MAX_TOKENS':
+        print('WARNING: Gemini response was truncated due to MAX_TOKENS limit')
+    
     text_response = data['candidates'][0]['content']['parts'][0]['text']
     
-    # Extract JSON from response
     json_text = text_response.strip()
     json_text = json_text.replace('```json\n', '')
     json_text = json_text.replace('```\n', '')
@@ -212,7 +204,16 @@ Make this analysis SPECIFIC to this person based on their actual content, not ge
     if not json_match:
         raise Exception('Could not parse AI response as JSON')
     
-    analysis = json.loads(json_match.group(0))
+    try:
+        analysis = json.loads(json_match.group(0))
+    except json.JSONDecodeError as e:
+        print(f'JSON parsing error: {e}')
+        print(f'Attempted to parse: {json_match.group(0)[:500]}...')
+        if finish_reason == 'MAX_TOKENS':
+            raise Exception('Response was truncated by token limit. Please increase maxOutputTokens or reduce prompt size.')
+        else:
+            raise Exception(f'Failed to parse JSON response: {str(e)}')
+    
     return analysis
 
 
@@ -245,10 +246,8 @@ def save_analyzed_data(request):
         "user_id": "optional-uuid"  // Optional
     }
     """
-    # Normalize camelCase to snake_case for processing
     data = request.data.copy()
     
-    # Map camelCase fields to snake_case
     field_mapping = {
         'linkedin_url': 'linkedin_profile',
         'primaryType': 'disc_primary',
@@ -262,16 +261,12 @@ def save_analyzed_data(request):
         'communicationDonts': 'communication_donts',
     }
     
-    # Apply mappings (prefer snake_case if both exist)
     for camel_key, snake_key in field_mapping.items():
         if camel_key in data and snake_key not in data:
             data[snake_key] = data[camel_key]
         elif camel_key in data and snake_key in data:
-            # Both exist, prefer snake_case
             pass
-        # If only snake_case exists, keep it as is
     
-    # Handle linkedin_url -> linkedin_profile
     if 'linkedin_url' in data and 'linkedin_profile' not in data:
         data['linkedin_profile'] = data['linkedin_url']
     
@@ -285,55 +280,100 @@ def save_analyzed_data(request):
     validated_data = serializer.validated_data
     user_id = validated_data.get('user_id')
     
+    raw_profile_data = data.get('rawProfileData', {})
+    
     try:
-        # Get linkedin_profile - handle empty strings as None
         linkedin_profile = validated_data.get('linkedin_profile', '')
         if linkedin_profile and linkedin_profile.strip():
             linkedin_profile = linkedin_profile.strip()
         else:
             linkedin_profile = None
 
-        
-        # Check if profile with same LinkedIn URL already exists
-        # Normalize URL for comparison (case-insensitive, remove trailing slashes)
+        profile_id = None
         if linkedin_profile:
-            # Normalize the URL: lowercase, remove trailing slash, remove query params
-            normalized_url = linkedin_profile.lower().strip().rstrip('/')
-            # Remove query parameters and fragments
-            if '?' in normalized_url:
-                normalized_url = normalized_url.split('?')[0]
-            if '#' in normalized_url:
-                normalized_url = normalized_url.split('#')[0]
-            
-            # Check for existing profiles with similar URLs
-            existing_profiles = AnalyzedProfile.objects.filter(
-                linkedin_profile__isnull=False
-            ).exclude(linkedin_profile='')
-            
-            for existing in existing_profiles:
-                # Normalize existing URL for comparison
-                existing_url = existing.linkedin_profile.lower().strip().rstrip('/')
-                if '?' in existing_url:
-                    existing_url = existing_url.split('?')[0]
-                if '#' in existing_url:
-                    existing_url = existing_url.split('#')[0]
-                
-                # Check if URLs match (after normalization)
-                if normalized_url == existing_url:
-                    # Return existing profile data with a message
-                    response_serializer = AnalyzedProfileModelSerializer(existing)
-                    return Response(
-                        {
-                            'message': 'Profile already exists in database',
-                            'already_exists': True,
-                            'profile': response_serializer.data
-                        },
-                        status=status.HTTP_200_OK
-                    )
+            profile_id = extract_linkedin_profile_id(linkedin_profile)
         
-        # Create analyzed profile record with all fields
+        if not profile_id:
+            return Response(
+                {'error': 'Invalid LinkedIn profile URL. Could not extract profile ID.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        raw_data_obj = None
+        if raw_profile_data:
+            def get_value(camel_key, fallback_key=None):
+                value = raw_profile_data.get(camel_key, raw_profile_data.get(fallback_key, '') if fallback_key else '')
+                if not value or not str(value).strip() or str(value).strip() == 'Not available':
+                    return None
+                return str(value).strip()
+            
+            raw_data_obj, created = RawData.objects.update_or_create(
+                profile_id=profile_id,
+                defaults={
+                    'linkedin_profile': linkedin_profile,
+                    'name': raw_profile_data.get('name', validated_data.get('name', '')),
+                    'headline': get_value('headline'),
+                    'location': get_value('location'),
+                    'about': get_value('about'),
+                    'experience': get_value('experience'),
+                    'education': get_value('education'),
+                    'skills': get_value('skills'),
+                    'connections_count': get_value('connectionsCount'),
+                    'current_company': get_value('currentCompany'),
+                    'top_skills': get_value('topSkills'),
+                    'activity': get_value('activity'),
+                    'posts': raw_profile_data.get('posts', []),
+                    'raw_data': raw_profile_data,
+                }
+            )
+        
+        existing_profile = None
+        try:
+            existing_profile = AnalyzedProfile.objects.get(profile_id=profile_id)
+        except AnalyzedProfile.DoesNotExist:
+            pass
+        
+        if existing_profile:
+            existing_profile.name = validated_data.get('name', existing_profile.name)
+            existing_profile.headline = validated_data.get('headline', existing_profile.headline)
+            existing_profile.confidence = validated_data.get('confidence', existing_profile.confidence)
+            existing_profile.dominance = validated_data.get('dominance', existing_profile.dominance)
+            existing_profile.influence = validated_data.get('influence', existing_profile.influence)
+            existing_profile.steadiness = validated_data.get('steadiness', existing_profile.steadiness)
+            existing_profile.compliance = validated_data.get('compliance', existing_profile.compliance)
+            existing_profile.disc_primary = validated_data.get('disc_primary', existing_profile.disc_primary)
+            existing_profile.key_insights = validated_data.get('key_insights', existing_profile.key_insights)
+            existing_profile.pain_points = validated_data.get('pain_points', existing_profile.pain_points)
+            existing_profile.communication_style = validated_data.get('communication_style', existing_profile.communication_style)
+            existing_profile.sales_approach = validated_data.get('sales_approach', existing_profile.sales_approach)
+            existing_profile.best_approach = validated_data.get('best_approach', existing_profile.best_approach)
+            existing_profile.ideal_pitch = validated_data.get('ideal_pitch', existing_profile.ideal_pitch)
+            existing_profile.communication_dos = validated_data.get('communication_dos', existing_profile.communication_dos)
+            existing_profile.communication_donts = validated_data.get('communication_donts', existing_profile.communication_donts)
+            existing_profile.raw_data = request.data
+            
+            if raw_data_obj:
+                existing_profile.raw_data_ref = raw_data_obj
+            
+            if user_id:
+                existing_profile.user_id = user_id
+            
+            existing_profile.save()
+            
+            response_serializer = AnalyzedProfileModelSerializer(existing_profile)
+            return Response(
+                {
+                    'message': 'Profile updated successfully',
+                    'updated': True,
+                    'profile': response_serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+        
         analyzed_profile = AnalyzedProfile.objects.create(
             user_id=user_id,
+            profile_id=profile_id,
+            raw_data_ref=raw_data_obj,
             name=validated_data.get('name', ''),
             headline=validated_data.get('headline', ''),
             linkedin_profile=linkedin_profile,
@@ -351,14 +391,14 @@ def save_analyzed_data(request):
             ideal_pitch=validated_data.get('ideal_pitch', ''),
             communication_dos=validated_data.get('communication_dos', []),
             communication_donts=validated_data.get('communication_donts', []),
-            raw_data=request.data,  # Store original request data as backup
+            raw_data=request.data,
         )
         
-        # Return saved profile
         response_serializer = AnalyzedProfileModelSerializer(analyzed_profile)
         return Response(
             {
                 'message': 'Analyzed data saved successfully',
+                'updated': False,
                 'profile': response_serializer.data
             },
             status=status.HTTP_201_CREATED
@@ -367,6 +407,66 @@ def save_analyzed_data(request):
     except Exception as e:
         return Response(
             {'error': 'Failed to save analyzed data', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@csrf_exempt
+@api_view(['GET'])
+def get_raw_data_by_profile_id(request, profile_id):
+    """
+    Get raw scraped data by LinkedIn profile ID.
+    
+    Example: GET /api/get-raw-data/sumit-patil-1b31a9271/
+    """
+    try:
+        raw_data = RawData.objects.get(profile_id=profile_id)
+        serializer = RawDataSerializer(raw_data)
+        return Response(
+            {
+                'message': 'Raw data retrieved successfully',
+                'data': serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
+    except RawData.DoesNotExist:
+        return Response(
+            {'error': 'Raw data not found for this profile ID'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        return Response(
+            {'error': 'Failed to retrieve raw data', 'message': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@csrf_exempt
+@api_view(['GET'])
+def get_analyzed_data_by_profile_id(request, profile_id):
+    """
+    Get analyzed data by LinkedIn profile ID.
+    
+    Example: GET /api/get-analyzed-data/sumit-patil-1b31a9271/
+    """
+    try:
+        analyzed_profile = AnalyzedProfile.objects.get(profile_id=profile_id)
+        serializer = AnalyzedProfileModelSerializer(analyzed_profile)
+        return Response(
+            {
+                'message': 'Analyzed data retrieved successfully',
+                'data': serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
+    except AnalyzedProfile.DoesNotExist:
+        return Response(
+            {'error': 'Analyzed data not found for this profile ID'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        return Response(
+            {'error': 'Failed to retrieve analyzed data', 'message': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -439,21 +539,16 @@ Location: {profile_data.get('location', 'Not available')}
 Headline (Full): {profile_data.get('headline', 'Not available')}
 Current Company: {profile_data.get('currentCompany', 'Not available')}
 Connections: {profile_data.get('connectionsCount', 'Unknown')}
-Followers: {profile_data.get('followersCount', 'Unknown')}
 
 About: {profile_data.get('about', 'No about section available')}
-
-Highlights: {profile_data.get('highlights', 'No highlights available')}
 
 Experience: {profile_data.get('experience', 'No experience data available')}
 
 Education: {profile_data.get('education', 'No education data')}
 
-Licenses and Certifications: {profile_data.get('licensesAndCertifications', 'No licenses or certifications listed')}
+Top Skills: {profile_data.get('topSkills', 'No top skills listed')}
 
-Skills: {profile_data.get('skills', 'No skills listed')}
-
-Services: {profile_data.get('services', 'No services listed')}
+All Skills: {profile_data.get('skills', 'No skills listed')}
 
 Recent Activity:
 {profile_data.get('activity', posts_text)}
@@ -540,8 +635,7 @@ Return ONLY this JSON (no markdown):
                 }]
             }],
             'generationConfig': {
-                'temperature': 0.8,
-                'maxOutputTokens': 2048
+                'temperature': 0.8
             }
         }
     )
@@ -550,6 +644,11 @@ Return ONLY this JSON (no markdown):
         raise Exception(f'Gemini API error: {response.status_code} - {response.text}')
     
     data = response.json()
+    
+    finish_reason = data.get('candidates', [{}])[0].get('finishReason', '')
+    if finish_reason == 'MAX_TOKENS':
+        print('WARNING: Gemini response was truncated due to MAX_TOKENS limit')
+    
     text_response = data['candidates'][0]['content']['parts'][0]['text']
     
     json_text = text_response.strip()
@@ -561,5 +660,14 @@ Return ONLY this JSON (no markdown):
     if not json_match:
         raise Exception('Could not parse AI response as JSON')
     
-    result = json.loads(json_match.group(0))
+    try:
+        result = json.loads(json_match.group(0))
+    except json.JSONDecodeError as e:
+        print(f'JSON parsing error: {e}')
+        print(f'Attempted to parse: {json_match.group(0)[:500]}...')
+        if finish_reason == 'MAX_TOKENS':
+            raise Exception('Response was truncated by token limit. Please increase maxOutputTokens or reduce prompt size.')
+        else:
+            raise Exception(f'Failed to parse JSON response: {str(e)}')
+    
     return result

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import AnalyzedProfile
+from .models import AnalyzedProfile, RawData
 
 
 class PostSerializer(serializers.Serializer):
@@ -20,10 +20,7 @@ class ProfileDataSerializer(serializers.Serializer):
     connectionsCount = serializers.CharField(required=False, allow_blank=True)
     linkedin_url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
     posts = PostSerializer(many=True, required=False, allow_null=True)
-    highlights = serializers.CharField(required=False, allow_blank=True)
-    services = serializers.CharField(required=False, allow_blank=True)
-    licensesAndCertifications = serializers.CharField(required=False, allow_blank=True)
-    followersCount = serializers.CharField(required=False, allow_blank=True)
+    topSkills = serializers.CharField(required=False, allow_blank=True)
     currentCompany = serializers.CharField(required=False, allow_blank=True)
     activity = serializers.CharField(required=False, allow_blank=True)
 
@@ -56,12 +53,10 @@ class AnalysisResponseSerializer(serializers.Serializer):
 
 class AnalyzedProfileSaveSerializer(serializers.Serializer):
     """Serializer for saving analyzed profile data"""
-    # Basic fields
     name = serializers.CharField(required=True)
     headline = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     linkedin_profile = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     
-    # DISC fields
     confidence = serializers.IntegerField(required=False, allow_null=True)
     dominance = serializers.IntegerField(required=False, allow_null=True)
     influence = serializers.IntegerField(required=False, allow_null=True)
@@ -69,7 +64,6 @@ class AnalyzedProfileSaveSerializer(serializers.Serializer):
     compliance = serializers.IntegerField(required=False, allow_null=True)
     disc_primary = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     
-    # Analysis fields
     key_insights = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
     pain_points = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
     communication_style = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -79,18 +73,36 @@ class AnalyzedProfileSaveSerializer(serializers.Serializer):
     communication_dos = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
     communication_donts = serializers.ListField(child=serializers.CharField(), required=False, allow_empty=True)
     
+    rawProfileData = serializers.DictField(required=False, allow_null=True)
+    
     user_id = serializers.UUIDField(required=False, allow_null=True)
 
 
 class AnalyzedProfileModelSerializer(serializers.ModelSerializer):
     """Serializer for AnalyzedProfile model"""
+    raw_data_ref_id = serializers.UUIDField(source='raw_data_ref.id', read_only=True)
+    
     class Meta:
         model = AnalyzedProfile
         fields = [
-            'id', 'user_id', 'name', 'headline', 'linkedin_profile',
+            'id', 'user_id', 'profile_id', 'raw_data_ref_id', 'name', 'headline', 'linkedin_profile',
             'confidence', 'dominance', 'influence', 'steadiness', 'compliance',
             'disc_primary', 'key_insights', 'pain_points', 'communication_style',
             'sales_approach', 'best_approach', 'ideal_pitch',
-            'communication_dos', 'communication_donts', 'raw_data', 'created_at'
+            'communication_dos', 'communication_donts', 'raw_data', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'raw_data_ref_id']
+
+
+class RawDataSerializer(serializers.ModelSerializer):
+    """Serializer for RawData model"""
+    class Meta:
+        model = RawData
+        fields = [
+            'id', 'profile_id', 'linkedin_profile', 'name', 'headline', 'location',
+            'about', 'experience', 'education', 'skills', 'connections_count',
+            'current_company',
+            'top_skills', 'activity', 'posts', 'raw_data',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']

@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import AnalyzedProfile
+from .models import AnalyzedProfile, RawData
 
 # Customize Django Admin Site
 admin.site.site_header = "LinkedIn DISC Analyzer"
@@ -154,12 +154,12 @@ class HasSalesApproachFilter(admin.SimpleListFilter):
 class AnalyzedProfileAdmin(admin.ModelAdmin):
     # Display all relevant fields in list view
     list_display = [
-        'name', 'linkedin_profile_link', 'headline_short', 'disc_primary', 'confidence', 
+        'name', 'profile_id', 'linkedin_profile_link', 'headline_short', 'disc_primary', 'confidence', 
         'dominance', 'influence', 'steadiness', 'compliance', 
         'communication_style_short', 'sales_approach_short', 
         'key_insights_count', 'pain_points_count', 
         'communication_dos_count', 'communication_donts_count',
-        'created_at'
+        'raw_data_ref_link', 'created_at'
     ]
     
     list_filter = [
@@ -176,13 +176,13 @@ class AnalyzedProfileAdmin(admin.ModelAdmin):
         'created_at',
     ]
     search_fields = [
-        'name', 'headline', 'linkedin_profile', 'disc_primary', 
+        'name', 'headline', 'linkedin_profile', 'profile_id', 'disc_primary', 
         'communication_style', 'sales_approach', 'best_approach', 
         'ideal_pitch', 'user_id'
     ]
     readonly_fields = [
         'id', 'created_at', 'key_insights_display', 'pain_points_display',
-        'communication_dos_display', 'communication_donts_display'
+        'communication_dos_display', 'communication_donts_display', 'raw_data_ref_link'
     ]
     list_per_page = 50
     date_hierarchy = 'created_at'
@@ -243,6 +243,17 @@ class AnalyzedProfileAdmin(admin.ModelAdmin):
             return format_html('<a href="{}" target="_blank">View Profile</a>', obj.linkedin_profile)
         return '-'
     linkedin_profile_link.short_description = 'LinkedIn'
+    
+    def raw_data_ref_link(self, obj):
+        """Display link to related raw data"""
+        if obj.raw_data_ref:
+            return format_html(
+                '<a href="/admin/api/rawdata/{}/change/">{}</a>',
+                obj.raw_data_ref.id,
+                obj.raw_data_ref.name
+            )
+        return '-'
+    raw_data_ref_link.short_description = 'Raw Data'
     
     # Custom display methods for detail view (JSON fields)
     def key_insights_display(self, obj):
@@ -311,7 +322,118 @@ class AnalyzedProfileAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
             'description': 'Full analysis response from Gemini API'
         }),
+        ('Relations', {
+            'fields': ('profile_id', 'raw_data_ref', 'raw_data_ref_link')
+        }),
         ('Metadata', {
             'fields': ('created_at',)
+        }),
+    )
+
+
+@admin.register(RawData)
+class RawDataAdmin(admin.ModelAdmin):
+    # Display all relevant fields in list view
+    list_display = [
+        'name', 'profile_id', 'linkedin_profile_link', 'headline_short', 
+        'location', 'current_company', 'connections_count',
+        'posts_count', 'created_at', 'updated_at'
+    ]
+    
+    list_filter = [
+        'created_at', 'updated_at',
+    ]
+    
+    search_fields = [
+        'name', 'headline', 'profile_id', 'linkedin_profile', 'location',
+        'current_company', 'skills', 'about', 'experience', 'education'
+    ]
+    
+    readonly_fields = [
+        'id', 'created_at', 'updated_at', 'posts_display', 'analyzed_profiles_link'
+    ]
+    
+    list_per_page = 50
+    date_hierarchy = 'created_at'
+    ordering = ['-created_at']
+    
+    # Custom display methods for list view
+    def headline_short(self, obj):
+        if obj.headline:
+            return obj.headline[:50] + '...' if len(obj.headline) > 50 else obj.headline
+        return '-'
+    headline_short.short_description = 'Headline'
+    headline_short.admin_order_field = 'headline'
+    
+    def posts_count(self, obj):
+        if obj.posts and isinstance(obj.posts, list):
+            count = len(obj.posts)
+            return f"{count} post{'s' if count != 1 else ''}"
+        return '0 posts'
+    posts_count.short_description = 'Posts'
+    
+    def linkedin_profile_link(self, obj):
+        if obj.linkedin_profile:
+            return format_html('<a href="{}" target="_blank">View Profile</a>', obj.linkedin_profile)
+        return '-'
+    linkedin_profile_link.short_description = 'LinkedIn'
+    
+    def analyzed_profiles_link(self, obj):
+        """Display link to related analyzed profiles"""
+        analyzed_profiles = obj.analyzed_profiles.all()
+        if analyzed_profiles:
+            links = []
+            for profile in analyzed_profiles:
+                links.append(f'<a href="/admin/api/analyzedprofile/{profile.id}/change/">{profile.name}</a>')
+            return format_html('<br>'.join(links))
+        return 'No analyzed profiles'
+    analyzed_profiles_link.short_description = 'Analyzed Profiles'
+    
+    # Custom display methods for detail view
+    def posts_display(self, obj):
+        """Display posts as a formatted list"""
+        if obj.posts and isinstance(obj.posts, list) and len(obj.posts) > 0:
+            html = '<div style="max-height: 300px; overflow-y: auto;">'
+            for i, post in enumerate(obj.posts, 1):
+                text = post.get('text', '')[:200] + '...' if len(post.get('text', '')) > 200 else post.get('text', '')
+                time = post.get('time', 'Unknown')
+                reactions = post.get('reactions', '0')
+                comments = post.get('comments', '0')
+                html += f'''
+                <div style="border: 1px solid #ddd; padding: 10px; margin: 5px 0; border-radius: 4px;">
+                    <strong>Post {i}</strong> ({time})<br>
+                    <em>{text}</em><br>
+                    <small>👍 {reactions} reactions | 💬 {comments} comments</small>
+                </div>
+                '''
+            html += '</div>'
+            return format_html(html)
+        return 'No posts available'
+    posts_display.short_description = 'Posts (Formatted)'
+    
+    # Enhanced fieldsets with all fields properly organized
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('id', 'profile_id', 'name', 'headline', 'linkedin_profile', 'location', 'current_company')
+        }),
+        ('Profile Details', {
+            'fields': ('about', 'experience', 'education', 'skills', 'top_skills')
+        }),
+        ('Social Metrics', {
+            'fields': ('connections_count', 'activity')
+        }),
+        ('Posts & Activity', {
+            'fields': ('posts', 'posts_display')
+        }),
+        ('Relations', {
+            'fields': ('analyzed_profiles_link',)
+        }),
+        ('Raw Data Backup', {
+            'fields': ('raw_data',),
+            'classes': ('collapse',),
+            'description': 'Complete raw scraped data as JSON'
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at')
         }),
     )
